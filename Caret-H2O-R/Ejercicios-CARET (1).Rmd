@@ -1,0 +1,244 @@
+---
+title: "CARET Ejercicios"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+author: "José Saviñón"
+---
+
+## 1. Preámbulo
+```{r Preámbulo}
+install.packages("caret")
+install.packages("tidyverse")
+library(caret)
+library(tidyverse)
+
+red_wine = read_delim("/cloud/project/Vinos/winequality-red.csv", 
+                      delim = ";") #cargalos datos especificando el delimitador
+
+glimpse(red_wine) #mostrar los datos cargados
+getwd() #comprobar directorio
+
+names(red_wine)#verificar los nombres de las columnas antes del cambio
+names(red_wine)=make.names((names(red_wine)))#cambio de nombres
+names(red_wine)#verificar luego del cambio
+
+ggplot(red_wine, aes(x=as.factor(quality)))+geom_bar()+
+  labs(title="Quality Distribution",x="Quality", y="Cantidad")
+     
+tidy_wine = red_wine %>% #se almacena en la variable tidy_wine
+  gather(key, value, -quality) %>% #se convierten todas las columnas en variables
+  mutate(quality = as.factor(quality))#excepto "quality" y se crean dos nuevas columnas
+#las columnas como keys y sus valores (los de las columnas) 
+#como values y luego se convierte a variable quality a tipo categoría (factor)
+glimpse(tidy_wine)
+
+?group_by()
+
+tidy_wine %>%
+  group_by(key, quality) %>%
+  summarise(value = mean(value)) %>%
+  mutate(value = (value-min(value))/(max(value)-min(value))) %>% 
+  ggplot(aes(quality, value, group = key)) +
+  geom_line(alpha = 0.5, size = 1.5) +
+  geom_point(size = 2) +
+  facet_wrap(~key)
+
+install.packages("rsample")
+# Cargamos rsample
+library(rsample)
+
+# Dividimos los datos entre training y test
+set.seed(1234)
+red_wine_split <- red_wine %>%
+  initial_split(prop = 0.8, strata = "quality")
+
+red_wine_train <- training(red_wine_split)
+red_wine_test <- testing(red_wine_split)
+
+glimpse(red_wine_train)
+glimpse(red_wine_test)
+
+#Entrenamiento de los datos (regresión lineal)
+set.seed(1234)
+fit_lm <- train(quality ~ ., 
+                method = "lm", 
+                data = red_wine_train,
+                trControl = trainControl(method = "none"))
+
+summary(fit_lm)
+
+#Entrenamiento de los datos (random forest)
+set.seed(1234)
+fit_rf <- train(quality ~ ., 
+                method = "rf", 
+                data = red_wine_train,
+                importance = TRUE,
+                trControl = trainControl(method = "none"))
+
+summary(fit_rf)
+varImp(fit_rf)
+
+install.packages("yardstick")
+# Cargamos yardstick
+library(yardstick)
+
+# Creamos nuevas columnas con los pronosticos de los modelos (con trampa)
+#utilizando los mismos datos del train para el test
+results <- red_wine_train %>%
+  mutate(`Linear regression` = predict(fit_lm, red_wine_train),
+         `Random forest` = predict(fit_rf, red_wine_train))
+
+# Evaluamos la performance
+metrics(results, truth = quality, estimate = `Linear regression`)
+metrics(results, truth = quality, estimate = `Random forest`)
+
+#Sin trampa (con los datos de test)
+results <- red_wine_test %>%
+  mutate(`Linear regression` = predict(fit_lm, red_wine_test),
+         `Random forest` = predict(fit_rf, red_wine_test))
+
+metrics(results, truth = quality, estimate = `Linear regression`)
+metrics(results, truth = quality, estimate = `Random forest`)
+
+#Modelo ajustado mediante Bootstrap
+set.seed(1234)
+red_wine_lm_bt <- train(quality ~ ., 
+                        method = "lm", 
+                        data = red_wine_train,
+                        trControl = trainControl(method = "boot", number = 5))
+
+set.seed(1234)
+red_wine_rf_bt <- train(quality ~ ., 
+                        method = "rf", 
+                        data = red_wine_train,
+                        trControl = trainControl(method = "boot", number = 5))
+
+# Echa un vistazo a los modelos
+red_wine_lm_bt
+red_wine_rf_bt
+
+#Perfermance con Bootstrap
+results <- red_wine_test %>%
+  mutate(`Linear regression` = predict(red_wine_lm_bt, red_wine_test),
+         `Random forest` = predict(red_wine_rf_bt, red_wine_test))
+
+metrics(results, truth = quality, estimate = `Linear regression`)
+metrics(results, truth = quality, estimate = `Random forest`)
+
+#Representación gráfica de los resultados
+results %>%
+  gather(Method, Result, `Linear regression`:`Random forest`) %>%
+  ggplot(aes(quality, Result, color = Method)) +
+  geom_point(size = 1.5, alpha = 0.5) +
+  facet_wrap(~Method) +
+  geom_abline(lty = 2, color = "gray50") +
+  geom_smooth(method = "lm")
+```
+
+## 2. Ejercicios
+
+### 2.2 Ejercicio 1
+
+Entrena una regresión lineal con `density` como variable dependiente y `chlorides`, `sulphates` y `alcohol` como independientes. Entrénala sobre el conjunto de training sin remuestreo y con remuestreo por bootstraping:
+
+¿cuál es la raíz del error cuadrático medio `(rmse)` de dicho modelo sobre el conjunto de *train* en ambos casos? Comprueba que el rmse es el mismo en ambos modelos sobre el conjunto de *test*. Comprueba además que los parámetros del modelo son idénticos en ambos modelos.
+
+Esto es debido a que CARET fija los parámetros del modelo con bootstraping utilizando todo el conjunto de train. Es decir, lo hace igual que el modelo sin remuestreo. Lo que cambia en el modelo con bootstraping es la estimación del error, que es más fiable que la del modelo sin remuestreo. En la vida real, es típico no particionar el dataset y entrenar con remuestreo. Esto garantiza una buena estimación del error así como que se utilicen todos los datos disponibles para fijar lo parámetros.
+
+#### Entrenando regresión lineal sin remuestreo
+```{r RL sin remuestreo}
+set.seed(1234)
+myfit_lm <- train(density ~ chlorides+sulphates+alcohol, 
+                method = "lm", 
+                data = red_wine_train,
+                trControl = trainControl(method = "none"))
+```
+
+#### Entrenando regresión lineal con remuestreo por bootstraping
+```{r RL con remuestreo}
+ 
+set.seed(1234)
+myfit_lm_bt <- train(density ~ chlorides+sulphates+alcohol, 
+                method = "lm", 
+                data = red_wine_train,
+                trControl = trainControl(method = "boot", number = 5))
+```
+
+#### Evaluando sobre el conjunto train (sin y con remuestreo)
+```{r Evaluando train}
+#Creando nuevas columnas
+results <- red_wine_train %>%
+  mutate(`Linear regression` = predict(myfit_lm, red_wine_train),
+         `Linear regression bootstrap` = predict(myfit_lm_bt, red_wine_train))
+#Evaluando performance
+metrics(results, truth = density, estimate = `Linear regression`)
+metrics(results, truth = density, estimate = `Linear regression bootstrap`)
+```
+Como podemos visualizar el `rmse` en ambos casos es el mismo, **0.001558332**	
+
+
+#### Evaluando sobre el conjunto test (sin y con remuestreo)
+```{r Evaluando test}
+#Creando nuevas columnas
+results <- red_wine_test %>%
+  mutate(`Linear regression` = predict(myfit_lm, red_wine_test),
+         `Linear regression bootstrap` = predict(myfit_lm_bt, red_wine_test))
+#Evaluando performance
+metrics(results, truth = density, estimate = `Linear regression`)
+metrics(results, truth = density, estimate = `Linear regression bootstrap`)
+```
+Lo mismo sucede aquí, en ambos casos el `rmse` es el mismo, **0.001736892**
+
+
+### 2.2 Ejercicio 2
+
+Vamos a practicar un nuevo tipo de remuestreo. Hasta ahora hemos utilizado *bootstraping* y entendido lo que eso significa. Ahora vamos a utilizar la validación cruzada (*cross-validation*), que significa tomar el conjunto de entrenamiento y dividirlo aleatoriamente en subconjuntos, también llamados *folds.* Un *fold* se refiere entonces a un subconjunto de nuestros datos. Todos ellos forman una partición de nuestro conjunto de entrenamiento.
+
+Se puede utilizar uno de esos *folds* como test y el resto de ellos como entrenamiento. Luego se repite este paso para cada uno de los *folds* y, al igual que se hizo con el *bootstraping*, se combinan los resultados, típicamente utilizando la media. La razón por la que se hace esto es la misma que para el *bootstraping*: mediante *cross-validation* se reduce el *overfitting* y se tiene una idea más ajustada de cómo se comportará el modelo con datos nuevos.
+
+En caret, la validación cruzada se implementa en `trainControl()` con `method = "cv"` o `method = "repeatedcv"`. Vamos a entender el método `cv` con más detalle. Supongamos que tenemos un conjunto de entrenamiento con 100.000 registros y queremos implementar una *10-fold cross-validation*. Esto significa dividir el conjunto de entrenamiento en 10 grupos (o *folds*) de 10.000 registros cada uno. En cada paso, un *fold* actúa como conjunto de test sobre el que se va a medir la performance del modelo que se ha entrenado sobre la unión de los 9 restantes.
+
+Ahora nos movemos al siguiente *fold* y repetimos lo anterior: entrenamos el modelo sobre el resto de los datos (los otros 9 *folds*) y lo evaluamos sobre él (una décima parte de los datos), que está actuando como conjunto de test.
+
+Lo hacemos nuevamente usando otro de nuestros *folds* como test, entrenando al modelo en el resto de los datos, y nos movemos a través de todos los subconjuntos o *folds* de los datos que creamos hasta que los utilicemos todos. Habremos entrenado entonces el modelo 10 veces, en 10 subconjuntos diferentes de datos, con 10 conjuntos de test diferentes.
+
+Este proceso que acabamos de describir es una ejecución de una validación cruzada con 10 *folds.* Es típico hacer varias ejecuciones, por ejemplo 5. En tal caso, se repite todo el proceso de un *10-fold cross-validation* 5 veces, cada una de ellas con una partición distinta de nuestro conjunto de datos en 10 *folds*. Este enfoque, llamado *repeated cross-validation* ha demostrado un desempeño muy bueno para entrenar modelos y es muy utilizado en machine learning.
+
+**En resumen:** cuando se realiza por ejemplo una validación cruzada con 10 *folds* repetida 5 veces, se divide aleatoriamente los datos de entrenamiento en 10 subconjuntos y entrena en 9 a la vez (validando en el otro subconjunto), iterando a través de los 10 subconjuntos para la validación. Luego se repite este proceso 5 veces. Simulaciones y experiencia práctica muestran que la validación cruzada de 10 folds repetida 5 veces es un gran enfoque de remuestreo para muchas situaciones.
+
+En este ejercicio tienes que entrenar el modelo de random forest mediante repeated cross-validation con 10-folds y repetirla 2 veces. Usa `method = "repeatedcv"` para la `10-fold cross-validation` (10 folds es el valor por defecto, pero puede ser cambiado). Utiliza `repeats = 2` para repetir la `10-fold cross-validation` 2 veces. Utiliza `quality` como variable dependiente y el resto como independientes, al igual que hemos hecho en los ejemplos del taller.
+
+¿Cuál es el `rmse` de este nuevo modelo sobre el conjunto de test? ¿opinas que es un error grande o pequeño? No hay una respuesta correcta para esta última pregunta pero para poder dar tu opinión, divide dicho error por el promedio de la variable `quality.` Eso lo transformará en un porcentaje que podrás interpretar. El `rmse` no se puede interpretar directamente (no como el *R cuadrado*, que sí se puede)
+
+#### Entrenando Random Forest con *repeated cross-validation*
+```{r RF repeated cv}
+set.seed(1234)
+myfit_rf_cv <- train(quality ~ ., 
+                method = "rf", 
+                data = red_wine_train,
+                importance = TRUE,
+                trControl = trainControl(method = "repeatedcv", repeats = 2))
+```
+
+#### Evaluando sobre el conjunto test 
+```{r RF evaluando test}
+#Creando nuevas columnas
+results <- red_wine_test %>%
+  mutate(`Random Forest` = predict(myfit_rf_cv, red_wine_test))
+
+#Evaluando performance
+metrics(results, truth = quality, estimate = `Random Forest`) 
+```
+
+El `rmse` del nuevo modelo es **0.5328951	**.
+
+#### Transformando a resultado interpretable 
+```{r}
+rmse_val=0.5328951	
+final_result=rmse_val/mean(red_wine_test$quality)
+final_result
+```
+
+El resultado final sería **0.09419566**.

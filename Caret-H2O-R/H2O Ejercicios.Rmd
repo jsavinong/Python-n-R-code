@@ -1,0 +1,218 @@
+---
+title: "H2O Project"
+author: "José Saviñón"
+date: "02/02/2022"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+
+---
+
+
+## 1. Preámbulo
+
+```{r Preámbulo}
+#Instalación de paquetes y preparación de datos
+#install.packages("h2o")
+library("h2o")
+h2o.init()
+data <- h2o.importFile("D:/MASTER AI/M6/Tema4/3491392/3491392/stackoverflow(2).csv")
+dim(data)
+
+h2o.describe(data)
+
+#Partición de datos
+splits <- h2o.splitFrame(data = data, 
+                         ratios = c(0.7, 0.15),  # divide el dataset en 70%, 15%, 15%
+                         destination_frames = c("train", "valid", "test"),
+                         seed = 1234) # Para que siempre los divida igual
+
+train <- splits[[1]]
+valid <- splits[[2]]
+test <- splits[[3]]
+
+nrow(train)
+nrow(valid)
+nrow(test)
+
+#Aprendizaje supervisado con H2O
+y <- "Remote"
+x <- setdiff(names(data), c(y, "Respondent"))#se asigna a x todas las variables sacando a Y(remote) y Respondent
+print(x)
+
+#Regresión Logística
+glm_fit1 <- h2o.glm(x = x, 
+                    y = y, 
+                    training_frame = train,
+                    family = "binomial",
+                    seed = 1234)
+
+glm_fit1@model$model_summary
+
+head(h2o.coef(glm_fit1))
+
+h2o.varimp_plot(glm_fit1)
+
+glm_perf1 <- h2o.performance(model = glm_fit1, newdata = test)
+print(glm_perf1)
+
+h2o.auc(glm_perf1)
+
+#Validación cruzada con K-folds
+glm_fit2 <- h2o.glm(x = x, 
+                    y = y, 
+                    training_frame = train,
+                    family = "binomial",
+                    nfolds = 5,
+                    seed = 1234)
+h2o.auc(glm_fit2)
+h2o.auc(glm_fit2, xval = TRUE)
+
+#Random forest
+rf_fit1 <- h2o.randomForest(x = x,
+                            y = y,
+                            training_frame = train,
+                            seed = 1234)
+rf_fit1@model$model_summary
+
+#aumentando número de árboles a 200
+rf_fit2 <- h2o.randomForest(x = x,
+                            y = y,
+                            training_frame = train,
+                            ntrees = 200,
+                            seed = 1234)
+
+#comparando ambos random forests
+rf_perf1 <- h2o.performance(model = rf_fit1,
+                            newdata = test)
+rf_perf2 <- h2o.performance(model = rf_fit2,
+                            newdata = test)
+
+# Extraemos el AUC del modelo 1
+h2o.auc(rf_perf1)
+
+# Extraemos el AUC del modelo 2
+h2o.auc(rf_perf2)
+
+#Grid Search
+rf_params <- list(ntrees = c(25, 50, 100, 200))
+
+rf_grid <- h2o.grid(algorithm = "drf",
+                     grid_id = "rf_grid",
+                     x = x, 
+                     y = y,
+                     training_frame = train,
+                     validation_frame = valid,
+                     seed = 1234,
+                     hyper_params = rf_params)
+
+rf_gridperf <- h2o.getGrid(grid_id = rf_grid@grid_id, 
+                           sort_by = "auc", 
+                           decreasing = TRUE)
+
+print(rf_gridperf)
+
+rf_best <- h2o.getModel(rf_gridperf@model_ids[1][[1]])
+
+
+rf_perf <- h2o.performance(model = rf_best,
+                           newdata = test)
+h2o.auc(rf_perf)
+
+#Gradient Boosting Machine
+gbm_fit1 <- h2o.gbm(x = x,
+                    y = y,
+                    training_frame = train,
+                    seed = 1234)
+
+gbm_fit2 <- h2o.gbm(x = x,
+                    y = y,
+                    training_frame = train,
+                    validation_frame = valid,
+                    ntrees = 1000,              # poner un valor grande
+                    stopping_rounds = 5,        # early stopping
+                    stopping_tolerance = 0.001, # early stopping (default)
+                    stopping_metric = "AUC",    # early stopping
+                    score_tree_interval = 20,   # early stopping
+                    seed = 1234)
+
+gbm_fit2@model$model_summary
+
+gbm_perf1 <- h2o.performance(model = gbm_fit1,
+                             newdata = test)
+gbm_perf2 <- h2o.performance(model = gbm_fit2,
+                             newdata = test)
+
+h2o.auc(gbm_perf1)
+h2o.auc(gbm_perf2)
+```
+
+## 2. Ejercicios
+### 2.1 Ejercicio 1
+
+Cuando vimos la importancia de las variables en la regresión logística, la variable más importante es vivir el Alemania. Esto quiere decir que vivir en dicho país influye significativamente en la probabilidad de trabajar en remoto: ¿en qué sentido influye: la aumenta o la disminuye? Para ello revisa el signo del coeficiente asociado a la `Country.Germany` en la regresión.
+
+**Vivir en Alemania disminuye significativamente la probabilidad de trabajar remoto, podemos confirmarlo viendo el signo negativo en el coeficiente de la variable Country.Germany.**
+```{r Ejercicio 1.1}
+head(h2o.coef(glm_fit1))
+```
+Obtén utilizando `dplyr` una tabla con el porcentaje de trabajadores remotos en cada país para el conjunto `data` (nuestro data set original). Compara los porcentajes y comprueba si tu conclusión anterior cambia o no.
+
+**En esta tabla se demuestra como el porcentaje de empleados remotos en Alemania (Germany) es de los más bajitos, por lo tanto se mantiene la conclusión de que vivir en Alemania influye bastante de manera negativa para los trabajos remotos.**
+```{r Ejercicio 1.2}
+data1 <- as.data.frame(data)# 
+#install.packages("dplyr")
+library("dplyr")
+
+my_data=data1 %>%
+        select(Country, Remote)%>%
+        group_by(Country) %>% 
+        filter(Remote=='Remote') %>%
+        summarise(Empleados_Remotos= n()) %>%
+        mutate('% de Empleados'=(Empleados_Remotos/sum(Empleados_Remotos))*100)
+print(my_data)
+```
+
+### 2.2 Ejercicio 2
+
+Otro de los parámetros del algoritmo de Random Forest es `max_depth`, que limita la profundidad del árbol. Este parámetro toma por defecto un valor de 50. Añade al grid el parámetro max_depth para que pruebe los valores 5, 10 y 50. Entrena el algoritmo con el nuevo grid (que ahora entrenará para cada valor de `ntrees` y `max_depth`) y obtén el valor de `ntrees` y `max_depth` con la mejor performance: ¿Cuál es la combinación óptima de `ntrees` y `max_depth`? No te olvides de poner `seed = 1234` en la función `h2o.grid`(). 
+
+**La mejor combinación es `max_depth = 5` y `ntrees = 50` que da el `auc` más alto, de 0.71189**
+```{r Ejercicio 2.1}
+h2o.init()
+rf_params2 = list(ntrees = c(25, 50, 100, 200), max_depth = c(5, 10 , 50))
+
+my_rf_gridX = h2o.grid(algorithm = "drf",
+                     grid_id = "my_rf_gridX",
+                     x = x, 
+                     y = y,
+                     training_frame = train,
+                     validation_frame = valid,
+                     seed = 1234,
+                     hyper_params = rf_params2)
+
+my_rf_gridperf = h2o.getGrid(grid_id = my_rf_gridX@grid_id, 
+                           sort_by = "auc", 
+                           decreasing = TRUE)
+
+print(my_rf_gridperf)
+```
+Obtén el AUC del modelo óptimo sobre el conjunto `test`.
+
+**Sobre el conjutno `test` el mejor `auc` es `0.7027958`.**
+```{r Ejercicio 2.2}
+my_rf_best <- h2o.getModel(my_rf_gridperf@model_ids[1][[1]])
+
+my_rf_perf <- h2o.performance(model = my_rf_best,
+                           newdata = test)
+h2o.auc(my_rf_perf)
+```
+
+### 2.3 Ejercicio 3
+Haz un gráfico de importancia de las variables con `h2o.varimp_plot` del modelo `gbm_fit2`: ¿cuál es la variable más importante? Compara los resultados entre este gráfico y el que obtuvimos para el caso de la regresión logística.
+
+**La variable de mayor importancia es `Salary`, a diferencia de la regresión logística que era `Country.Germany` **
+```{r Ejercicio 3}
+h2o.varimp_plot(gbm_fit2)
+```
