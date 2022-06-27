@@ -1,1 +1,0 @@
-Se desea crear un informe en el que se muestren en un mapa las estaciones de servicio de España incluyendo los precios de sus productos principales e información adicional.
